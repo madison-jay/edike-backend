@@ -5,3 +5,4 @@ test.py
 *.pyc
 update_user_role.py
 venv
+app.log
