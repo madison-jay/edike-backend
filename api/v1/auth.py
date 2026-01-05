@@ -28,6 +28,9 @@ def load_user_from_jwt():
     Sets g.current_user (auth.uid) and g.user_role (from user_metadata)
     and initializes g.supabase_user_client for RLS-aware database operations.
     """
+    if request.method == "OPTIONS":
+        return None
+
     auth_header = request.headers.get('Authorization')
     refresh_token = request.headers.get('X-Refresh-Token')
     g.current_user = None
