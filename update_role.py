@@ -9,11 +9,14 @@ from supabase import create_client, Client
 SUPABASE_URL = getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = getenv("SUPABASE_SERVICE_KEY")
 
+if not SUPABASE_URL or not SERVICE_ROLE_KEY:
+    raise ValueError("Missing required environment variables: SUPABASE_URL and SUPABASE_SERVICE_KEY")
+
 # Create Supabase client with admin privileges
 supabase: Client = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
 
 # The user ID (UUID) from the Supabase Auth user list
-user_id = "65771fda-1388-4956-a161-86c61e48ca40"
+user_id = "7f1a56da-dbbf-4214-91d6-e3508b20e58f"
 
 # New metadata you want to set
 new_metadata = {
