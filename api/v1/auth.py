@@ -2,13 +2,14 @@
 from flask import request, g, current_app, jsonify
 from functools import wraps
 from supabase import create_client, Client
+from typing import Optional
 import jwt
 import os
 
 # Initialize Supabase clients (these will be set from app.py's config)
 # We'll use current_app.config to get these values after app context is pushed
-public_supabase_client: Client = None
-service_supabase_client: Client = None
+public_supabase_client: Optional[Client] = None
+service_supabase_client: Optional[Client] = None
 
 
 def init_supabase_clients(app):

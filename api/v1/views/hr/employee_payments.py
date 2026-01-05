@@ -24,7 +24,7 @@ def is_valid_uuid(uuid_string):
 def get_employee_payments():
     """Fetch all employee payments."""
     try:
-        employee_payment_data = get_employees_payment_data(None)
+        employee_payment_data = get_employees_payment_data("")
         if not employee_payment_data:
             return jsonify({"message": "No employee payments found"}), 204
         return jsonify(employee_payment_data), 200
