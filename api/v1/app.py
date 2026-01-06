@@ -9,7 +9,6 @@ from api.v1.auth import load_user_from_jwt, init_supabase_clients, public_supaba
 import logging
 
 
-load_dotenv()  # Load environment variables from .env file
 
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s %(name)s %(threadName)s - %(message)s')
 app = Flask(__name__)
