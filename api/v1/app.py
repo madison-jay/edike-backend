@@ -9,6 +9,7 @@ from api.v1.auth import load_user_from_jwt, init_supabase_clients, public_supaba
 import logging
 
 
+load_dotenv()  # Load environment variables from .env file
 
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s %(name)s %(threadName)s - %(message)s')
 app = Flask(__name__)
@@ -36,7 +37,7 @@ def not_found(error):
     return jsonify({"error": "Not found"}), 404
 
 @app.errorhandler(401)
-def unauthorised(error) -> str:
+def unauthorised(error):
     """
     unauthorised handler
     """
@@ -44,14 +45,14 @@ def unauthorised(error) -> str:
 
 
 @app.errorhandler(403)
-def handle_forbidden(error) -> str:
+def handle_forbidden(error):
     """
     forbidden handler
     """
     return jsonify({"error": "Forbidden"}), 403
 
 @app.errorhandler(500)
-def internal_server_error(error) -> str:
+def internal_server_error(error):
     """
     internal server error handler
     """
@@ -59,5 +60,5 @@ def internal_server_error(error) -> str:
 
 if __name__ == '__main__':
     host = getenv('FLASK_HOST', '0.0.0.0')
-    port = getenv('FLASK_PORT', 5000)
+    port = int(getenv('FLASK_PORT', 5000))
     app.run(debug=True, port=port, host=host) # Run on port 5000 for development
