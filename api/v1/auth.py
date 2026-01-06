@@ -1,108 +1,174 @@
 # erp_backend/auth.py
+
 from flask import request, g, current_app, jsonify
 from functools import wraps
 from supabase import create_client, Client
-from typing import Optional
 import jwt
+from jwt import PyJWKClient
 import os
+import certifi
+import ssl
 
-# Initialize Supabase clients (these will be set from app.py's config)
-# We'll use current_app.config to get these values after app context is pushed
-public_supabase_client: Optional[Client] = None
-service_supabase_client: Optional[Client] = None
+# Force default SSL context to use certifi's CA bundle
+ssl._create_default_https_context = ssl._create_unverified_context
+# Better: create a context with certifi
+default_context = ssl.create_default_context(cafile=certifi.where())
+ssl._create_default_https_context = lambda: default_context
+
+# Global Supabase clients (initialized once via init_supabase_clients)
+public_supabase_client: Client | None = None
+service_supabase_client: Client | None = None
+
+# Supabase JWKS URL — replace with your actual project ref if different
+JWKS_URL = "https://dxijucrxupbqfvqdttwi.supabase.co/auth/v1/.well-known/jwks.json"
+
+# Create a single shared JWK client for efficiency
+jwk_client = PyJWKClient(JWKS_URL, cache_keys=True, lifespan=3600)
 
 
 def init_supabase_clients(app):
-    """Initializes global Supabase clients using app config."""
-    print("Initializing Supabase clients...")
+    """
+    Initialize global Supabase clients using config from the Flask app.
+    Call this once in your app factory (e.g., in app.py).
+    """
     global public_supabase_client, service_supabase_client
-    public_supabase_client = create_client(app.config['SUPABASE_URL'], app.config['SUPABASE_KEY'])
-    service_supabase_client = create_client(app.config['SUPABASE_URL'], app.config['SUPABASE_SERVICE_KEY'])
-    print("Supabase clients initialized successfully.")
-    print(f"Public client: {public_supabase_client}")
-    print(f"Service client: {service_supabase_client}")
+
+    if public_supabase_client is None or service_supabase_client is None:
+        print("Initializing Supabase clients...")
+        public_supabase_client = create_client(
+            app.config["SUPABASE_URL"], app.config["SUPABASE_KEY"]
+        )
+        service_supabase_client = create_client(
+            app.config["SUPABASE_URL"], app.config["SUPABASE_SERVICE_KEY"]
+        )
+        print("Supabase clients initialized successfully.")
+
 
 def load_user_from_jwt():
     """
-    Middleware to extract and verify JWT from Authorization header.
-    Sets g.current_user (auth.uid) and g.user_role (from user_metadata)
-    and initializes g.supabase_user_client for RLS-aware database operations.
+    Middleware function to validate the Supabase JWT from the Authorization header.
+    On success:
+        - Sets g.current_user = user ID (sub)
+        - Sets g.user_role = role from app_metadata (e.g., 'hr_manager', 'admin')
+        - Sets g.supabase_user_client = public client (for potential RLS use)
+    On failure:
+        - Sets g.jwt_error with reason
     """
-    if request.method == "OPTIONS":
-        return None
-
-    auth_header = request.headers.get('Authorization')
-    refresh_token = request.headers.get('X-Refresh-Token')
+    auth_header = request.headers.get("Authorization")
     g.current_user = None
     g.user_role = None
     g.jwt_error = None
-    # Ensure public_supabase_client is initialized before use
-    if service_supabase_client is None:
-        init_supabase_clients(current_app)
-    g.supabase_user_client = public_supabase_client # Default to public client
+    g.supabase_user_client = public_supabase_client  # fallback
 
-    if auth_header and auth_header.startswith('Bearer '):
-        token = auth_header.split(' ')[1]
-        try:
-            decoded_token = jwt.decode(
-                token,
-                current_app.config['SUPABASE_JWT_SECRET'],
-                algorithms=["HS256"],
-                audience="authenticated"
-            )
-            print(f"Decoded JWT: {decoded_token.get('app_metadata', {})}") 
-            g.supabase_user_client = create_client(
-                current_app.config['SUPABASE_URL'],
-                current_app.config['SUPABASE_KEY'],
-            )
-            g.service_supabase_client = create_client(
-                current_app.config['SUPABASE_URL'],
-                current_app.config['SUPABASE_SERVICE_KEY'],
-            )
+    if not auth_header or not auth_header.startswith("Bearer "):
+        g.jwt_error = "Missing or invalid Authorization header"
+        return
 
-            if not refresh_token:
-                raise ValueError("Refresh token is required for this operation")
-            g.supabase_user_client.auth.set_session(token, refresh_token)  # Set the auth token for RLS-aware operations
-            g.current_user = decoded_token['sub']  
-            print("current_user: ", g.current_user)
-            g.user_role = decoded_token.get("app_metadata").get('role', 'employee')  
-            
-            print(f"User role fetched from DB: {g.user_role}")
-            
+    token = auth_header.split(" ")[1]
 
-        except ValueError as ve:
-            g.jwt_error = str(ve)
-        except jwt.ExpiredSignatureError:
-            g.jwt_error = "Token has expired"
-        except jwt.InvalidTokenError:
-            g.jwt_error = "Invalid token"
-        except Exception as e:
-            print(e)
-            g.jwt_error = f"JWT processing error: {str(e)}"
+    try:
+        # Fetch the correct signing key from Supabase JWKS based on the token
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+
+        # Decode and verify the JWT
+        decoded_token = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256"],
+            audience="authenticated",
+            options={
+                "verify_signature": True,
+                "verify_exp": True,
+                "verify_aud": True,
+            },
+        )
+
+        # Extract user info
+        g.current_user = decoded_token.get("sub")
+        app_metadata = decoded_token.get("app_metadata", {})
+        g.user_role = app_metadata.get("role", "employee")  # default fallback
+
+        # Optional: you can also store the full token or decoded payload if needed
+        g.jwt_payload = decoded_token
+
+        print(f"Authenticated user: {g.current_user} | Role: {g.user_role}")
+
+    except jwt.ExpiredSignatureError:
+        g.jwt_error = "Token has expired"
+    except jwt.InvalidAudienceError:
+        g.jwt_error = "Invalid audience"
+    except jwt.InvalidSignatureError:
+        g.jwt_error = "Invalid signature"
+    except jwt.InvalidKeyError:
+        g.jwt_error = "Invalid key"
+    except jwt.DecodeError:
+        g.jwt_error = "Token decode error"
+    except Exception as e:
+        g.jwt_error = f"JWT verification failed: {str(e)}"
+        print(f"JWT Error: {e}")
 
 
 def login_required(f):
-    """Decorator to ensure a user is authenticated."""
+    """
+    Decorator to protect routes that require authentication.
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        load_user_from_jwt()  # Ensure JWT is processed
+
         if not g.current_user:
-            return jsonify({"message": "Authentication required", "error": g.jwt_error or "No token provided"}), 401
+            error_msg = g.jwt_error or "Authentication required"
+            return jsonify({"message": error_msg}), 401
+
         return f(*args, **kwargs)
+
     return decorated_function
 
-def role_required(roles):
+
+def role_required(allowed_roles: list[str]):
     """
-    Decorator to ensure the authenticated user has one of the specified roles.
-    Takes a list of allowed roles.
+    Decorator factory to restrict access to specific roles.
+    Example usage:
+        @role_required(['admin', 'hr_manager'])
+        def some_route():
+            ...
     """
+    if isinstance(allowed_roles, str):
+        allowed_roles = [allowed_roles]
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            load_user_from_jwt()
+
             if not g.current_user:
-                return jsonify({"message": "Authentication required", "error": g.jwt_error or "No token provided"}), 401
-            if g.user_role not in roles:
-                print(f"User role {g.user_role} does not have access. Required roles: {roles}")
-                return jsonify({"message": "Permission denied", "required_roles": roles, "your_role": g.user_role}), 403
+                error_msg = g.jwt_error or "Authentication required"
+                return jsonify({"message": error_msg}), 401
+
+            if g.user_role not in allowed_roles:
+                return jsonify({
+                    "message": "Permission denied",
+                    "your_role": g.user_role,
+                    "required_roles": allowed_roles
+                }), 403
+
             return f(*args, **kwargs)
+
         return decorated_function
+
     return decorator
+
+
+# Optional: Helper to get current user info in routes
+def get_current_user():
+    """
+    Convenience function to get user info in protected routes.
+    Returns dict with id and role, or None if not authenticated.
+    """
+    if hasattr(g, "current_user") and g.current_user:
+        return {
+            "id": g.current_user,
+            "role": g.user_role,
+            "payload": getattr(g, "jwt_payload", None)
+        }
+    return None

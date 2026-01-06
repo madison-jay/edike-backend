@@ -109,26 +109,23 @@ def create_employee():
             return jsonify({"error": "HR Manager cannot create Super Admin users"}), 403
         
         response = create_auth_user_and_employee(data)
-        employee_data = response.get('employee')
-        if not employee_data:
-            return jsonify({"error": "Failed to create employee record"}), 500
-        employee_id = employee_data['id']
+        employee_id = response.get('employee')['id']
         documents = data.get('documents', [])
         processed_documents = []
         if documents and len(documents) > 0:
-            processed_documents = employee_document_service(documents, employee_id)
+            processed_documents = create_employee_document(documents, employee_id)
 
         return jsonify(**response, documents=processed_documents), 201
 
-    except ValidationError as e:
-        # catch pydantic validation errors
-        return jsonify({"error": "Validation failed", "details": str(e.errors())}), 400
     except ValueError as ve:
-        # catch other value errors
+        # catch pydantic validation errors
         return jsonify({"error": "Validation failed", "details": str(ve)}), 400
     except TypeError as te:
         # catch type errors, often from missing required fields
         return jsonify({"error": "Type error", "details": str(te)}), 400
+    except ValidationError as e:
+        # catch pydantic validation errors
+        return jsonify({"error": "Validation failed", "details": str(e.errors())}), 400
     except Exception as e:
         print(f"Error creating employee: {str(e)}")
         #catch any other exceptions and return a generic error message
@@ -171,8 +168,6 @@ def update_employee(employee_id):
             if new_role and new_role in ALLOWED_ROLES:
                 if linked_user_id:
                     # Update the user's metadata (role) in Supabase Auth via service
-                    if service_supabase_client is None:
-                        return jsonify({"error": "Service client not available."}), 500
                     success = update_auth_user_role(linked_user_id, new_role, service_supabase_client)
                     if not success:
                         return jsonify({"error": "Failed to update user role in Supabase Auth."}), 500
