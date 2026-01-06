@@ -37,7 +37,7 @@ def not_found(error):
     return jsonify({"error": "Not found"}), 404
 
 @app.errorhandler(401)
-def unauthorised(error):
+def unauthorised(error) -> str:
     """
     unauthorised handler
     """
@@ -45,14 +45,14 @@ def unauthorised(error):
 
 
 @app.errorhandler(403)
-def handle_forbidden(error):
+def handle_forbidden(error) -> str:
     """
     forbidden handler
     """
     return jsonify({"error": "Forbidden"}), 403
 
 @app.errorhandler(500)
-def internal_server_error(error):
+def internal_server_error(error) -> str:
     """
     internal server error handler
     """
@@ -60,5 +60,5 @@ def internal_server_error(error):
 
 if __name__ == '__main__':
     host = getenv('FLASK_HOST', '0.0.0.0')
-    port = int(getenv('FLASK_PORT', 5000))
+    port = getenv('FLASK_PORT', 5000)
     app.run(debug=True, port=port, host=host) # Run on port 5000 for development
